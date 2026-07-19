@@ -1,0 +1,17 @@
+services:
+  wardrive-viewer:
+    build: .
+    ports:
+      - "8080:80"
+    environment:
+      KISMET_DATA_DIR: /data
+      KISMET_UPLOAD_DIR: /uploads
+      MAX_UPLOAD_MB: 512
+    volumes:
+      # The recordings remain one directory above the web application.
+      - ../:/data:ro
+      - kismet_uploads:/uploads
+    restart: unless-stopped
+
+volumes:
+  kismet_uploads:
