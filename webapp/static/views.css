@@ -13,6 +13,18 @@
 #timeline svg { width:100%; height:230px; overflow:visible }
 #timeline text { font:10px ui-monospace,monospace }
 #timeline .grid line { stroke:var(--line); stroke-width:1 }
+.map-panel { margin:0 0 18px }
+.map-panel .panel-title { padding:0 16px }
+.map-legend { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:9px }
+.map-legend i { width:8px; height:8px; border-radius:50%; margin-left:10px }
+.map-legend .network { background:var(--orange) }.map-legend .device { background:var(--ink) }
+.map-legend b { color:var(--ink); margin-left:14px }
+.map-stage { height:440px; position:relative; overflow:hidden; background:#e9eee8 }
+#worldMap { width:100%; height:100%; z-index:0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace }
+.leaflet-popup-content strong { font-family:system-ui,sans-serif }
+.leaflet-popup-content small { display:block; margin-top:4px; color:var(--muted) }
+.map-empty { position:absolute; inset:0; z-index:500; display:flex; align-items:center; justify-content:center; background:#e9eee8cc; color:var(--muted); pointer-events:none }
+.map-empty[hidden] { display:none }
 .modal { position:fixed; inset:0; z-index:20; background:#111612aa; opacity:0; visibility:hidden; transition:.18s; display:flex; justify-content:flex-end }
 .modal.open { opacity:1; visibility:visible }
 .drawer { width:min(880px,94vw); height:100%; overflow:auto; padding:36px; transform:translateX(30px); transition:.18s; position:relative }
@@ -27,4 +39,6 @@
   .results .panel-title { height:auto; min-height:56px; flex-wrap:wrap; gap:8px }
   .view-switch { height:42px }
   .drawer { padding:28px 16px }
+  .map-stage { height:310px }
+  .map-legend { gap:4px }.map-legend b { display:none }
 }
