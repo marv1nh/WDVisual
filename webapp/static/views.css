@@ -1,0 +1,30 @@
+.view-switch { display:flex; height:100%; margin-left:-16px }
+.view-switch button { border:0; border-right:1px solid var(--line); background:transparent; padding:0 16px; font:700 9px ui-monospace,monospace; letter-spacing:.1em; cursor:pointer }
+.view-switch button.active { background:var(--ink); color:var(--lime) }
+.device-count { font:700 18px system-ui!important; color:var(--orange) }
+.network-row { cursor:pointer }
+.network-row:hover td { background:#f0f6d9 }
+.timeline { margin:0 0 18px }
+.timeline .panel-title { padding:0 16px }
+.legend { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:9px }
+.legend i { width:18px; height:3px; margin-left:10px }
+.legend .packets { background:var(--orange) }.legend .devices { background:var(--ink) }.legend .ssids { background:#91b51e }
+#timeline { min-height:230px; padding:0 12px; display:flex; align-items:center; justify-content:center; color:var(--muted) }
+#timeline svg { width:100%; height:230px; overflow:visible }
+#timeline text { font:10px ui-monospace,monospace }
+#timeline .grid line { stroke:var(--line); stroke-width:1 }
+.modal { position:fixed; inset:0; z-index:20; background:#111612aa; opacity:0; visibility:hidden; transition:.18s; display:flex; justify-content:flex-end }
+.modal.open { opacity:1; visibility:visible }
+.drawer { width:min(880px,94vw); height:100%; overflow:auto; padding:36px; transform:translateX(30px); transition:.18s; position:relative }
+.modal.open .drawer { transform:none }
+.close { position:absolute; right:22px; top:16px; border:0; background:transparent; font:32px/1 system-ui; cursor:pointer }
+.drawer h2 { margin:8px 0 4px; font:700 30px system-ui; letter-spacing:-.04em }
+.drawer h3 { margin:30px 0 10px; font-size:10px; letter-spacing:.13em }
+.detail-stats { color:var(--muted) }.detail-stats b { color:var(--orange); font:700 22px system-ui; margin-right:4px }.detail-stats b+* { margin-left:20px }
+.detail-note { border-left:3px solid var(--lime); padding:10px 14px; color:var(--muted); font-size:11px }
+.detail-loading { padding:80px 0; text-align:center; color:var(--muted) }
+@media(max-width:800px) {
+  .results .panel-title { height:auto; min-height:56px; flex-wrap:wrap; gap:8px }
+  .view-switch { height:42px }
+  .drawer { padding:28px 16px }
+}
