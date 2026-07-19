@@ -2,7 +2,7 @@ services:
   wardrive-viewer:
     build: .
     ports:
-      - "8080:80"
+      - "8080:8080"
     environment:
       KISMET_DATA_DIR: /data
       KISMET_UPLOAD_DIR: /uploads
