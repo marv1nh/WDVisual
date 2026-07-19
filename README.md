@@ -9,6 +9,7 @@ A local, read-only web app for exploring Wardrive and Kismet `.kismet` SQLite da
 - Inspect access point radios and clients inferred from captured BSSID traffic.
 - Search, filter, and sort network and device lists.
 - Review packet, device, and SSID trends over time.
+- Plot GPS-located networks and devices on a detailed OpenStreetMap map with pan and zoom controls.
 
 ## Quick Start
 
@@ -19,6 +20,18 @@ docker compose up --build
 ```
 
 Open <http://localhost:8080>.
+
+The GPS map loads Leaflet and OpenStreetMap tiles over the internet. The rest of the capture viewer remains local.
+
+## Synthetic GPS test data
+
+For map development, assign deterministic test locations to every device in a disposable capture database:
+
+```bash
+python3 scripts/add_synthetic_gps.py example.kismet --backup /tmp/example-before-gps.kismet
+```
+
+This modifies the database in place and must not be used on an original capture without a backup.
 
 ## Storage
 

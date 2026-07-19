@@ -190,6 +190,32 @@ def timeline():
         return jsonify(error=str(e)), 400
 
 
+@app.get("/api/locations")
+def locations():
+    """Return valid GPS positions, distinguishing Wi-Fi networks from devices."""
+    try:
+        path = resolve_file(request.args.get("file", ""))
+        with connect(path) as con:
+            rows = con.execute(
+                "SELECT devmac,phyname,type,avg_lat,avg_lon,strongest_signal,device "
+                "FROM devices WHERE avg_lat BETWEEN -90 AND 90 AND avg_lon BETWEEN -180 AND 180 "
+                "AND NOT (avg_lat = 0 AND avg_lon = 0)"
+            ).fetchall()
+        items = []
+        for row in rows:
+            is_network = row["phyname"] == "IEEE802.11" and row["type"] == "Wi-Fi AP"
+            name = (json_value(row["device"], "kismet.device.base.commonname")
+                    or json_value(row["device"], "kismet.device.base.name")
+                    or ("Hidden network" if is_network else "Unknown device"))
+            items.append({"kind": "network" if is_network else "device", "name": name,
+                          "mac": row["devmac"], "type": row["type"] or row["phyname"] or "Unknown",
+                          "lat": row["avg_lat"], "lon": row["avg_lon"],
+                          "signal": row["strongest_signal"]})
+        return jsonify(items=items, total=len(items))
+    except (ValueError, sqlite3.Error) as e:
+        return jsonify(error=str(e)), 400
+
+
 @app.get("/api/network-devices")
 def network_devices():
     """Find AP radios and clients observed exchanging frames through an SSID's BSSIDs."""
