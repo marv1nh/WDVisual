@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Wardrive Overview</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/views.css">
+</head>
+<body>
+<header><div><span class="eyebrow">KISMET INTELLIGENCE</span><h1>Wardrive <i>Overview</i></h1></div><div class="live"><b></b> LOCAL ANALYSIS</div></header>
+<main>
+  <section class="toolbar panel">
+    <label class="file-label">ACTIVE CAPTURE<select id="file"></select></label>
+    <div class="file-meta" id="fileMeta">Loading files…</div>
+    <label class="upload">＋ LOAD .KISMET<input id="upload" type="file" accept=".kismet"></label>
+  </section>
+  <div id="message"></div>
+  <section class="stats">
+    <article><span>DEVICES</span><strong id="total">—</strong><small>unique observations</small></article>
+    <article><span>PACKETS</span><strong id="packets">—</strong><small>captured in total</small></article>
+    <article><span>GEOLOCATION</span><strong id="located">—</strong><small>devices with coordinates</small></article>
+    <article><span>TIME SPAN</span><strong id="duration">—</strong><small id="period">—</small></article>
+  </section>
+  <section class="panel timeline"><div class="panel-title"><span>CAPTURE GROWTH OVER TIME</span><div class="legend"><i class="packets"></i>Packets <i class="devices"></i>Devices <i class="ssids"></i>SSIDs</div></div><div id="timeline"><span>Loading timeline…</span></div></section>
+  <section class="panel map-panel">
+    <div class="panel-title"><span>GPS LOCATIONS</span><div class="map-legend"><i class="network"></i>Networks <i class="device"></i>Devices <b id="mapCount">0</b> LOCATED</div></div>
+    <div class="map-stage" id="mapStage">
+      <div id="worldMap" role="application" aria-label="Interactive world map of located networks and devices"></div>
+      <div id="mapEmpty" class="map-empty">Loading GPS locations…</div>
+    </div>
+  </section>
+  <section class="workspace">
+    <aside class="panel filters"><div class="panel-title">FILTERS <button id="reset">RESET</button></div>
+      <label>SEARCH<input id="q" placeholder="SSID, MAC, manufacturer…"></label>
+      <label>DEVICE TYPE<select id="type"><option value="">All types</option></select></label>
+      <label>RADIO / PHY<select id="phy"><option value="">All radios</option></select></label>
+      <label>ENCRYPTION<select id="encryption"><option value="">All</option><option>WPA3</option><option>WPA2</option><option>WPA</option><option>WEP</option><option>Open</option></select></label>
+      <label>MIN. SIGNAL <output id="signalOut">All</output><input id="signal" type="range" min="-100" max="-30" value="-100" step="5"></label>
+      <label class="check"><input id="locatedOnly" type="checkbox"> Only with GPS location</label>
+      <div class="signal-chart"><span>SIGNAL DISTRIBUTION</span><div id="bars"></div></div>
+    </aside>
+    <section class="panel results"><div class="panel-title"><div class="view-switch"><button class="active" data-view="networks">WI‑FI NETWORKS</button><button data-view="radios">RADIOS</button></div><span><b id="resultCount">0</b> RESULTS</span><label>SORT <select id="sort"></select></label></div>
+      <div class="table-wrap"><table><thead><tr id="head"></tr></thead><tbody id="rows"></tbody></table></div>
+      <footer><span id="range"></span><div><button id="prev">←</button><span id="page"></span><button id="next">→</button></div></footer>
+    </section>
+  </section>
+</main>
+<div id="networkModal" class="modal" aria-hidden="true"><section class="drawer panel"><button id="closeNetwork" class="close" aria-label="Close">×</button><div id="networkDetail"></div></section></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="/static/app.js"></script>
+</body></html>
