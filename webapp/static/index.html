@@ -6,9 +6,10 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/views.css">
+  <script>try{const theme=localStorage.getItem('wdvisual-theme');if(theme)document.documentElement.dataset.theme=theme;else if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.dataset.theme='dark'}catch{}</script>
 </head>
 <body>
-<header><div><span class="eyebrow">KISMET INTELLIGENCE</span><h1>Wardrive <i>Overview</i></h1></div><div class="live"><b></b> LOCAL ANALYSIS</div></header>
+<header><div><span class="eyebrow">KISMET INTELLIGENCE</span><h1>Wardrive <i>Visual</i></h1></div><div class="header-actions"><button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span aria-hidden="true">☾</span><b>DARK</b></button><div class="live"><b></b> LOCAL ANALYSIS</div></div></header>
 <main>
   <section class="toolbar panel">
     <label class="file-label">ACTIVE CAPTURE<select id="file"></select></label>
