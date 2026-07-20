@@ -3,7 +3,7 @@
 .view-switch button.active { background:var(--ink); color:var(--lime) }
 .device-count { font:700 18px system-ui!important; color:var(--orange) }
 .network-row { cursor:pointer }
-.network-row:hover td { background:#f0f6d9 }
+.network-row:hover td { background:var(--hover) }
 .timeline { margin:0 0 18px }
 .timeline .panel-title { padding:0 16px }
 .legend { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:9px }
@@ -19,17 +19,17 @@
 .map-legend i { width:8px; height:8px; border-radius:50%; margin-left:10px }
 .map-legend .network { background:var(--orange) }.map-legend .device { background:var(--ink) }
 .map-legend b { color:var(--ink); margin-left:14px }
-.map-stage { height:440px; position:relative; overflow:hidden; background:#e9eee8 }
+.map-stage { height:440px; position:relative; overflow:hidden; background:var(--map) }
 #worldMap { width:100%; height:100%; z-index:0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace }
 .leaflet-popup-content strong { font-family:system-ui,sans-serif }
 .leaflet-popup-content small { display:block; margin-top:4px; color:var(--muted) }
-.map-empty { position:absolute; inset:0; z-index:500; display:flex; align-items:center; justify-content:center; background:#e9eee8cc; color:var(--muted); pointer-events:none }
+.map-empty { position:absolute; inset:0; z-index:500; display:flex; align-items:center; justify-content:center; background:var(--map); color:var(--muted); pointer-events:none }
 .map-empty[hidden] { display:none }
 .modal { position:fixed; inset:0; z-index:20; background:#111612aa; opacity:0; visibility:hidden; transition:.18s; display:flex; justify-content:flex-end }
 .modal.open { opacity:1; visibility:visible }
 .drawer { width:min(880px,94vw); height:100%; overflow:auto; padding:36px; transform:translateX(30px); transition:.18s; position:relative }
 .modal.open .drawer { transform:none }
-.close { position:absolute; right:22px; top:16px; border:0; background:transparent; font:32px/1 system-ui; cursor:pointer }
+.close { position:absolute; right:22px; top:16px; border:0; background:transparent; color:var(--ink); font:32px/1 system-ui; cursor:pointer }
 .drawer h2 { margin:8px 0 4px; font:700 30px system-ui; letter-spacing:-.04em }
 .drawer h3 { margin:30px 0 10px; font-size:10px; letter-spacing:.13em }
 .detail-stats { color:var(--muted) }.detail-stats b { color:var(--orange); font:700 22px system-ui; margin-right:4px }.detail-stats b+* { margin-left:20px }
