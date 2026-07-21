@@ -11,8 +11,24 @@
 <body>
 <header><div><span class="eyebrow">KISMET INTELLIGENCE</span><h1>Wardrive <i>Visual</i></h1></div><div class="header-actions"><button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span aria-hidden="true">☾</span><b>DARK</b></button><div class="live"><b></b> LOCAL ANALYSIS</div></div></header>
 <main>
+  <nav class="app-tabs" role="tablist" aria-label="Application views">
+    <button id="viewerTabButton" class="active" type="button" role="tab" aria-selected="true" aria-controls="viewerTab" data-tab="viewer">VIEWER</button>
+    <button id="generatorTabButton" type="button" role="tab" aria-selected="false" aria-controls="generatorTab" data-tab="generator">GENERATE DATA</button>
+  </nav>
+  <section id="viewerTab" class="app-tab-panel" role="tabpanel" aria-labelledby="viewerTabButton">
   <section class="toolbar panel">
-    <label class="file-label">ACTIVE CAPTURE<select id="file"></select></label>
+    <div class="file-picker-wrap">
+      <span class="file-label-text">ACTIVE CAPTURES</span>
+      <button type="button" id="fileToggle" class="file-toggle" aria-haspopup="listbox" aria-expanded="false" aria-controls="filePicker">Loading…</button>
+      <div id="filePicker" class="file-picker" hidden role="listbox" aria-multiselectable="true" aria-label="Select capture files">
+        <div id="fileList" class="file-list"></div>
+        <div class="file-picker-actions">
+          <button type="button" id="fileSelectAll">ALL</button>
+          <button type="button" id="fileSelectNone">NONE</button>
+          <button type="button" id="fileApply" class="primary">APPLY</button>
+        </div>
+      </div>
+    </div>
     <div class="file-meta" id="fileMeta">Loading files…</div>
     <label class="upload">＋ LOAD .KISMET<input id="upload" type="file" accept=".kismet"></label>
   </section>
@@ -45,6 +61,40 @@
       <div class="table-wrap"><table><thead><tr id="head"></tr></thead><tbody id="rows"></tbody></table></div>
       <footer><span id="range"></span><div><button id="prev">←</button><span id="page"></span><button id="next">→</button></div></footer>
     </section>
+  </section>
+  </section>
+  <section id="generatorTab" class="app-tab-panel generator-view" role="tabpanel" aria-labelledby="generatorTabButton" hidden>
+    <div class="generator-intro">
+      <div><span class="eyebrow">SYNTHETIC CAPTURE BUILDER</span><h2>Generate test observations</h2></div>
+      <p>Create a small WDVisual-compatible capture with connected Wi-Fi clients and optional GPS positions. Generated files stay in the isolated upload storage.</p>
+    </div>
+    <form id="generatorForm" class="generator-layout">
+      <section class="panel generator-controls">
+        <div class="panel-title"><span>CAPTURE PARAMETERS</span><output id="generatedDeviceCount">40 DEVICES</output></div>
+        <div class="generator-fields">
+          <label>NETWORKS<input id="generateNetworks" name="networks" type="number" min="1" max="500" value="10" required><small>Each network creates one access point.</small></label>
+          <label>CLIENTS PER NETWORK<input id="generateClients" name="clients_per_network" type="number" min="0" max="100" value="3" required><small>Clients are linked through generated packet traffic.</small></label>
+          <label class="field-wide">SSID PREFIX<input id="generateSsid" name="ssid_prefix" maxlength="32" value="test" required><small>Networks will be named test 1, test 2, test 3, and so on.</small></label>
+          <label class="check generator-gps-toggle"><input id="generateGps" name="gps_enabled" type="checkbox" checked> Include GPS locations</label>
+          <div id="generatorCoordinates" class="coordinate-fields field-wide">
+            <label>LATITUDE<input id="generateLatitude" name="latitude" type="number" min="-90" max="90" step="any" value="55.6761" required></label>
+            <label>LONGITUDE<input id="generateLongitude" name="longitude" type="number" min="-180" max="180" step="any" value="12.5683" required></label>
+          </div>
+        </div>
+        <div class="generator-actions">
+          <button id="generateSubmit" class="primary-action" type="submit">GENERATE .KISMET</button>
+          <span>GPS observations are spread uniformly through a 1 km circle around the selected center.</span>
+        </div>
+        <div id="generatorStatus" aria-live="polite"></div>
+      </section>
+      <section class="panel generator-map-panel">
+        <div class="panel-title"><span>GPS CENTER</span><small>CLICK THE MAP OR EDIT COORDINATES</small></div>
+        <div class="generator-map-stage">
+          <div id="generatorMap" role="application" aria-label="Choose the center for generated GPS locations"></div>
+          <div id="generatorMapEmpty" class="map-empty" hidden>The online map library could not be loaded</div>
+        </div>
+      </section>
+    </form>
   </section>
 </main>
 <div id="networkModal" class="modal" aria-hidden="true"><section class="drawer panel"><button id="closeNetwork" class="close" aria-label="Close">×</button><div id="networkDetail"></div></section></div>
