@@ -20,14 +20,21 @@ class SyntheticKismetTests(unittest.TestCase):
         self.data.mkdir()
         self.old_upload_dir = app_module.UPLOAD_DIR
         self.old_data_dir = app_module.DATA_DIR
+        self.old_analysis_db = app_module.ANALYSIS_DB
+        app_module.stop_analysis_runner()
         app_module.UPLOAD_DIR = self.uploads
         app_module.DATA_DIR = self.data
+        app_module.ANALYSIS_DB = self.root / "state.sqlite3"
+        app_module._analysis_state_path = None
         app_module.app.config.update(TESTING=True)
         self.client = app_module.app.test_client()
 
     def tearDown(self):
+        app_module.stop_analysis_runner()
         app_module.UPLOAD_DIR = self.old_upload_dir
         app_module.DATA_DIR = self.old_data_dir
+        app_module.ANALYSIS_DB = self.old_analysis_db
+        app_module._analysis_state_path = None
         self.temp.cleanup()
 
     def parameters(self, **changes):
@@ -95,7 +102,9 @@ class SyntheticKismetTests(unittest.TestCase):
             "networks": 2,
             "clients_per_network": 3,
             "ssid_prefix": "lab",
-            "gps_enabled": False,
+            "gps_enabled": True,
+            "latitude": 55.6761,
+            "longitude": 12.5683,
         })
 
         self.assertEqual(response.status_code, 201)
@@ -109,6 +118,127 @@ class SyntheticKismetTests(unittest.TestCase):
         )
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(len(detail.get_json()["clients"]), 3)
+        access_point = detail.get_json()["access_points"][0]
+        self.assertNotEqual(access_point["avg_lat"], 0)
+        self.assertNotEqual(access_point["avg_lon"], 0)
+        locations = self.client.get(
+            "/api/locations",
+            query_string={"file": result["id"]},
+        )
+        self.assertEqual(locations.status_code, 200)
+        located_items = locations.get_json()["items"]
+        clients = [item for item in located_items if item["type"] == "Wi-Fi Client"]
+        access_point_macs = {
+            item["mac"] for item in located_items if item["kind"] == "network"
+        }
+        self.assertEqual(len(clients), 6)
+        self.assertTrue(all(item["name"].startswith("Client ") for item in clients))
+        self.assertTrue(all(item["network_mac"] in access_point_macs for item in clients))
+
+    def test_locations_uses_manufacturer_for_unnamed_wifi_client(self):
+        target = self.uploads / "manufacturer-fallback.kismet"
+        app_module.create_synthetic_kismet(
+            target, self.parameters(networks=1, clients_per_network=1),
+            random.Random(4), now=1_700_000_000,
+        )
+        with sqlite3.connect(target) as con:
+            row = con.execute(
+                "SELECT devkey,devmac,device FROM devices WHERE type='Wi-Fi Client'"
+            ).fetchone()
+            blob = json.loads(row[2])
+            blob["kismet.device.base.commonname"] = row[1]
+            blob.pop("kismet.device.base.name", None)
+            blob["kismet.device.base.manuf"] = "Fallback Wireless"
+            con.execute(
+                "UPDATE devices SET device=? WHERE devkey=?",
+                (json.dumps(blob), row[0]),
+            )
+
+        response = self.client.get(
+            "/api/locations",
+            query_string={"file": "Upload:manufacturer-fallback.kismet"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        client = next(
+            item for item in response.get_json()["items"]
+            if item["type"] == "Wi-Fi Client"
+        )
+        self.assertEqual(client["name"], "Fallback Wireless")
+        self.assertIsNotNone(client["network_mac"])
+
+    def test_networks_can_sort_by_associated_client_count(self):
+        target = self.uploads / "client-sort.kismet"
+        app_module.create_synthetic_kismet(
+            target, self.parameters(networks=3, clients_per_network=1),
+            random.Random(5), now=1_700_000_000,
+        )
+        with sqlite3.connect(target) as con:
+            access_points = con.execute(
+                "SELECT devmac FROM devices WHERE type='Wi-Fi AP' ORDER BY devkey"
+            ).fetchall()
+            first_client = con.execute(
+                "SELECT devkey,device FROM devices WHERE type='Wi-Fi Client' ORDER BY devkey"
+            ).fetchone()
+            first_client_blob = json.loads(first_client[1])
+            first_client_blob["dot11.device"]["dot11.device.last_bssid"] = (
+                "00:00:00:00:00:00"
+            )
+            con.execute(
+                "UPDATE devices SET device=? WHERE devkey=?",
+                (json.dumps(first_client_blob), first_client[0]),
+            )
+            con.execute("DELETE FROM packets WHERE transmac=?", (access_points[0][0],))
+            con.execute(
+                "INSERT INTO packets VALUES (?,?,?,?)",
+                (1_700_000_000, "02:FF:FF:FF:FF:01",
+                 access_points[2][0], access_points[2][0]),
+            )
+
+        response = self.client.get(
+            "/api/networks",
+            query_string={"file": "Upload:client-sort.kismet", "sort": "clients"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()["items"]
+        self.assertEqual(
+            [(item["name"], item["clients"]) for item in items],
+            [("test 3", 2), ("test 2", 1), ("test 1", 0)],
+        )
+
+    def test_last_bssid_associations_work_without_packet_bssids(self):
+        target = self.uploads / "last-bssid.kismet"
+        app_module.create_synthetic_kismet(
+            target, self.parameters(networks=2, clients_per_network=2),
+            random.Random(6), now=1_700_000_000,
+        )
+        with sqlite3.connect(target) as con:
+            con.execute("UPDATE packets SET transmac='00:00:00:00:00:00'")
+
+        networks = self.client.get(
+            "/api/networks",
+            query_string={"file": "Upload:last-bssid.kismet", "sort": "clients"},
+        )
+        locations = self.client.get(
+            "/api/locations",
+            query_string={"file": "Upload:last-bssid.kismet"},
+        )
+        detail = self.client.get(
+            "/api/network-devices",
+            query_string={"file": "Upload:last-bssid.kismet", "ssid": "test 1"},
+        )
+
+        self.assertEqual(networks.status_code, 200)
+        self.assertEqual(
+            [item["clients"] for item in networks.get_json()["items"]], [2, 2]
+        )
+        location_items = locations.get_json()["items"]
+        ap_macs = {item["mac"] for item in location_items if item["kind"] == "network"}
+        clients = [item for item in location_items if item["type"] == "Wi-Fi Client"]
+        self.assertTrue(all(item["network_mac"] in ap_macs for item in clients))
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(len(detail.get_json()["clients"]), 2)
 
     def test_generation_api_rejects_invalid_or_oversized_parameters(self):
         invalid_payloads = [

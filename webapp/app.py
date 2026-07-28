@@ -1,8 +1,11 @@
+import atexit
+import hashlib
 import json
 import math
 import os
 import random
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -10,10 +13,18 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
+from analysis import store as analysis_store
+from analysis.registry import get_module, modules as analysis_modules
+from analysis.runner import JobRunner
+
 app = Flask(__name__, static_folder="static")
 DATA_DIR = Path(os.getenv("KISMET_DATA_DIR", "/data"))
-UPLOAD_DIR = Path(os.getenv("KISMET_UPLOAD_DIR", "/uploads"))
+UPLOAD_DIR = Path(os.getenv("KISMET_UPLOAD_DIR", "/tmp/wdvisual-uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ANALYSIS_DB = Path(
+    os.getenv("WDVISUAL_STATE_DB", str(UPLOAD_DIR / "wdvisual-state.sqlite3"))
+)
+MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_UPLOAD_MB", "512")) * 1024 * 1024
 MAX_SYNTHETIC_NETWORKS = 500
 MAX_SYNTHETIC_CLIENTS_PER_NETWORK = 100
@@ -43,6 +54,12 @@ def resolve_file(file_id):
     return root / item["name"], item
 
 
+def capture_revision(file_id, path):
+    stat = path.stat()
+    source = f"{file_id}\0{stat.st_size}\0{stat.st_mtime_ns}"
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
 def selected_files():
     """Resolve one or more capture IDs from repeated or comma-separated `file` params."""
     ids = request.args.getlist("file")
@@ -66,6 +83,84 @@ def connect(path):
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA query_only=ON")
     return con
+
+
+_analysis_state_lock = threading.Lock()
+_analysis_state_path = None
+_analysis_runner = None
+
+
+def ensure_analysis_state():
+    global _analysis_state_path
+    current = str(ANALYSIS_DB)
+    if _analysis_state_path == current:
+        return
+    with _analysis_state_lock:
+        if _analysis_state_path == current:
+            return
+        analysis_store.migrate(ANALYSIS_DB, MIGRATIONS_DIR)
+        analysis_store.sync_modules(ANALYSIS_DB, analysis_modules())
+        _analysis_state_path = current
+        analysis_runner().start()
+
+
+def analysis_runner():
+    global _analysis_runner
+    if _analysis_runner is None:
+        _analysis_runner = JobRunner(
+            state_path=lambda: ANALYSIS_DB,
+            resolve_capture=resolve_file,
+            connect_capture=connect,
+            input_revision=capture_revision,
+            module_lookup=get_module,
+        )
+    return _analysis_runner
+
+
+def stop_analysis_runner():
+    global _analysis_runner
+    if _analysis_runner is not None:
+        _analysis_runner.stop()
+        _analysis_runner = None
+
+
+atexit.register(stop_analysis_runner)
+
+
+def enqueue_analysis(file_id, module_name="session_quality", parameters=None):
+    ensure_analysis_state()
+    module = get_module(module_name)
+    if module is None:
+        raise ValueError("Unknown analysis module")
+    if not analysis_store.module_enabled(ANALYSIS_DB, module.name):
+        raise ValueError(f"Analysis module {module.name} is disabled")
+    path, meta = resolve_file(file_id)
+    with connect(path) as connection:
+        validation_errors = module.validate(connection)
+    if validation_errors:
+        raise ValueError("; ".join(validation_errors))
+    scope = {
+        "type": "session",
+        "sessions": [{"id": file_id, "name": meta["name"], "source": meta["source"]}],
+    }
+    job = analysis_store.create_job(
+        ANALYSIS_DB,
+        module,
+        scope,
+        file_id,
+        capture_revision(file_id, path),
+        parameters or {},
+    )
+    analysis_runner().wake()
+    return job
+
+
+def automatic_quality_job(file_id):
+    try:
+        return enqueue_analysis(file_id)
+    except (ValueError, sqlite3.Error, OSError) as error:
+        app.logger.warning("Automatic session quality analysis was not queued: %s", error)
+        return None
 
 
 def validate_kismet(path):
@@ -227,6 +322,9 @@ def create_synthetic_kismet(path, params, rng=None, now=None):
                     "kismet.device.base.crypt": encryption,
                     "kismet.device.base.packets.total": 4,
                     "kismet.device.base.manuf": "WDVisual Synthetic",
+                    "dot11.device": {
+                        "dot11.device.last_bssid": ap_mac,
+                    },
                 })
                 con.execute(
                     "INSERT INTO devices VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -253,9 +351,11 @@ def generate_file():
         if not validate_kismet(target):
             raise ValueError("The generated file failed Kismet validation")
         stat = target.stat()
+        file_id = f"Upload:{target.name}"
+        analysis_job = automatic_quality_job(file_id)
         return jsonify(
             ok=True,
-            id=f"Upload:{target.name}",
+            id=file_id,
             name=target.name,
             size=stat.st_size,
             modified=int(stat.st_mtime),
@@ -263,6 +363,7 @@ def generate_file():
             clients=params["networks"] * params["clients_per_network"],
             total_devices=params["total_devices"],
             gps_enabled=params["gps_enabled"],
+            analysis_job=analysis_job["id"] if analysis_job else None,
         ), 201
     except (ValueError, sqlite3.Error, OSError) as error:
         if target is not None:
@@ -313,7 +414,13 @@ def upload():
     if not validate_kismet(target):
         target.unlink(missing_ok=True)
         return jsonify(error="The file is not a valid Kismet SQLite database"), 400
-    return jsonify(ok=True, id=f"Upload:{target.name}"), 201
+    file_id = f"Upload:{target.name}"
+    analysis_job = automatic_quality_job(file_id)
+    return jsonify(
+        ok=True,
+        id=file_id,
+        analysis_job=analysis_job["id"] if analysis_job else None,
+    ), 201
 
 
 def json_value(blob, key, default=None):
@@ -321,6 +428,16 @@ def json_value(blob, key, default=None):
         return json.loads(blob or "{}").get(key, default)
     except (ValueError, TypeError):
         return default
+
+
+def client_last_bssid(blob):
+    """Return Kismet's last associated BSSID, excluding empty/zero values."""
+    try:
+        dot11 = json.loads(blob or "{}").get("dot11.device") or {}
+        bssid = str(dot11.get("dot11.device.last_bssid") or "").strip().upper()
+        return bssid if bssid and bssid != "00:00:00:00:00:00" else None
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def device_summary(row):
@@ -503,13 +620,59 @@ def locations():
                     "FROM devices WHERE avg_lat BETWEEN -90 AND 90 AND avg_lon BETWEEN -180 AND 180 "
                     "AND NOT (avg_lat = 0 AND avg_lon = 0)"
                 ).fetchall()
+                ap_macs = {
+                    row["devmac"].upper() for row in rows
+                    if row["phyname"] == "IEEE802.11" and row["type"] == "Wi-Fi AP"
+                }
+                association_counts = {}
+                if ap_macs:
+                    placeholders = ",".join("?" for _ in ap_macs)
+                    packet_rows = con.execute(
+                        f"SELECT upper(sourcemac) source,upper(destmac) dest,"
+                        f"upper(transmac) network_mac,count(*) packets FROM packets "
+                        f"WHERE upper(transmac) IN ({placeholders}) "
+                        f"GROUP BY source,dest,network_mac",
+                        list(ap_macs),
+                    ).fetchall()
+                    for packet in packet_rows:
+                        for client_mac in (packet["source"], packet["dest"]):
+                            if (not client_mac or client_mac in ap_macs
+                                    or client_mac == "FF:FF:FF:FF:FF:FF"
+                                    or client_mac.startswith(("01:", "33:"))):
+                                continue
+                            key = (client_mac, packet["network_mac"])
+                            association_counts[key] = association_counts.get(key, 0) + packet["packets"]
+                associations = {}
+                for (client_mac, network_mac), packets in association_counts.items():
+                    if packets > associations.get(client_mac, (None, -1))[1]:
+                        associations[client_mac] = (network_mac, packets)
             for row in rows:
                 is_network = row["phyname"] == "IEEE802.11" and row["type"] == "Wi-Fi AP"
-                name = (json_value(row["device"], "kismet.device.base.commonname")
-                        or json_value(row["device"], "kismet.device.base.name")
-                        or ("Hidden network" if is_network else "Unknown device"))
+                name_candidates = (
+                    json_value(row["device"], "kismet.device.base.commonname"),
+                    json_value(row["device"], "kismet.device.base.name"),
+                )
+                normalized_mac = "".join(
+                    character for character in (row["devmac"] or "").casefold()
+                    if character.isalnum()
+                )
+                raw_name = next((
+                    candidate for candidate in name_candidates
+                    if candidate and "".join(
+                        character for character in str(candidate).casefold()
+                        if character.isalnum()
+                    ) != normalized_mac
+                ), None)
+                manufacturer = json_value(row["device"], "kismet.device.base.manuf", "")
+                name = raw_name or ("Hidden network" if is_network else manufacturer or "Unknown device")
+                metadata_bssid = client_last_bssid(row["device"])
+                client_association = associations.get(row["devmac"].upper())
                 items.append({"kind": "network" if is_network else "device", "name": name,
                               "mac": row["devmac"], "type": row["type"] or row["phyname"] or "Unknown",
+                              "manufacturer": manufacturer,
+                              "network_mac": metadata_bssid or (
+                                  client_association[0] if client_association else None
+                              ),
                               "lat": row["avg_lat"], "lon": row["avg_lon"],
                               "signal": row["strongest_signal"], **capture_fields(file_id, meta)})
         return jsonify(items=items, total=len(items), files=len(selected))
@@ -537,6 +700,33 @@ def network_devices():
                     continue
                 aps.extend(file_aps)
                 ap_macs = {a["devmac"].upper() for a in file_aps}
+                metadata_bssids = {}
+                for row in con.execute(
+                        "SELECT * FROM devices WHERE phyname='IEEE802.11' "
+                        "AND type='Wi-Fi Client'"):
+                    bssid = client_last_bssid(row["device"])
+                    if not bssid:
+                        continue
+                    mac = row["devmac"].upper()
+                    metadata_bssids[mac] = bssid
+                    if bssid not in ap_macs:
+                        continue
+                    summary = device_summary(row)
+                    if mac in clients_by_mac:
+                        client = clients_by_mac[mac]
+                        if file_id not in client["files"]:
+                            client["files"].append(file_id)
+                            client["file_names"].append(meta["name"])
+                        client["network_last_time"] = max(
+                            client["network_last_time"], summary["last_time"]
+                        )
+                        continue
+                    summary.update(capture_fields(file_id, meta))
+                    summary["network_packets"] = 0
+                    summary["network_last_time"] = summary["last_time"]
+                    summary["files"] = [file_id]
+                    summary["file_names"] = [meta["name"]]
+                    clients_by_mac[mac] = summary
                 placeholders = ",".join("?" for _ in ap_macs)
                 packet_rows = con.execute(
                     f"SELECT upper(sourcemac) source,upper(destmac) dest,count(*) packets,max(ts_sec) last_time "
@@ -545,7 +735,11 @@ def network_devices():
                 traffic = {}
                 for p in packet_rows:
                     for mac in (p["source"], p["dest"]):
-                        if not mac or mac in ap_macs or mac == "FF:FF:FF:FF:FF:FF" or mac.startswith("01:") or mac.startswith("33:33"):
+                        if (not mac or mac in ap_macs
+                                or (mac in metadata_bssids
+                                    and metadata_bssids[mac] not in ap_macs)
+                                or mac == "FF:FF:FF:FF:FF:FF"
+                                or mac.startswith("01:") or mac.startswith("33:33")):
                             continue
                         item = traffic.setdefault(mac, {"packets": 0, "last_time": 0})
                         item["packets"] += p["packets"]
@@ -576,8 +770,12 @@ def network_devices():
         if not aps:
             return jsonify(error="Network not found"), 404
         clients = sorted(clients_by_mac.values(), key=lambda x: x["network_packets"], reverse=True)
-        return jsonify(ssid=wanted, access_points=aps, clients=clients, files=len(selected),
-                       note="Clients are inferred from frames observed through the network BSSID; silent or encrypted-only clients may not be identifiable.")
+        return jsonify(
+            ssid=wanted, access_points=aps, clients=clients, files=len(selected),
+            note="Clients use Kismet's last associated BSSID when available, with "
+                 "captured BSSID traffic as a fallback; silent clients without "
+                 "association metadata may not be identifiable.",
+        )
     except (ValueError, sqlite3.Error) as e:
         return jsonify(error=str(e)), 400
 
@@ -593,6 +791,39 @@ def networks():
         for file_id, path, meta in selected:
             with connect(path) as con:
                 rows = con.execute("SELECT * FROM devices WHERE phyname='IEEE802.11' AND type='Wi-Fi AP'").fetchall()
+                ap_macs = {row["devmac"].upper() for row in rows}
+                clients_by_ap = {mac: set() for mac in ap_macs}
+                metadata_bssids = {}
+                for client in con.execute(
+                        "SELECT devmac,device FROM devices WHERE phyname='IEEE802.11' "
+                        "AND type='Wi-Fi Client'"):
+                    bssid = client_last_bssid(client["device"])
+                    if not bssid:
+                        continue
+                    client_mac = client["devmac"].upper()
+                    metadata_bssids[client_mac] = bssid
+                    if bssid in clients_by_ap:
+                        clients_by_ap[bssid].add(client_mac)
+                if ap_macs:
+                    placeholders = ",".join("?" for _ in ap_macs)
+                    packet_rows = con.execute(
+                        f"SELECT upper(sourcemac) source,upper(destmac) dest,"
+                        f"upper(transmac) network_mac FROM packets "
+                        f"WHERE upper(transmac) IN ({placeholders}) "
+                        f"GROUP BY source,dest,network_mac",
+                        list(ap_macs),
+                    ).fetchall()
+                    for packet in packet_rows:
+                        associated = clients_by_ap[packet["network_mac"]]
+                        for client_mac in (packet["source"], packet["dest"]):
+                            if (not client_mac or client_mac in ap_macs
+                                    or (client_mac in metadata_bssids
+                                        and metadata_bssids[client_mac]
+                                        != packet["network_mac"])
+                                    or client_mac == "FF:FF:FF:FF:FF:FF"
+                                    or client_mac.startswith(("01:", "33:"))):
+                                continue
+                            associated.add(client_mac)
             for row in rows:
                 d, blob = dict(row), row["device"]
                 name = json_value(blob, "kismet.device.base.commonname") or json_value(blob, "kismet.device.base.name") or "Hidden network"
@@ -614,9 +845,10 @@ def networks():
                     grouped[key] = {"name": name, "devices": 0, "channels": set(), "encryptions": set(),
                                     "strongest_signal": -999, "packets": 0, "last_time": 0,
                                     "first_time": d["first_time"], "macs": [], "located": 0,
-                                    "files": [], "file_names": []}
+                                    "clients": set(), "files": [], "file_names": []}
                 n = grouped[key]
                 n["devices"] += 1
+                n["clients"].update(clients_by_ap.get(d["devmac"].upper(), set()))
                 n["channels"].add(channel)
                 n["encryptions"].add(crypt)
                 n["strongest_signal"] = max(n["strongest_signal"], d["strongest_signal"])
@@ -629,8 +861,11 @@ def networks():
                     n["files"].append(file_id)
                     n["file_names"].append(meta["name"])
         items = list(grouped.values())
+        for item in items:
+            item["clients"] = len(item["clients"])
         sort_keys = {"devices": "devices", "last": "last_time", "first": "first_time",
-                     "signal": "strongest_signal", "name": "name", "packets": "packets"}
+                     "signal": "strongest_signal", "name": "name", "packets": "packets",
+                     "clients": "clients"}
         sort = sort_keys.get(request.args.get("sort"), "devices")
         items.sort(key=lambda x: str(x[sort]).casefold() if isinstance(x[sort], str) else x[sort],
                    reverse=request.args.get("dir") != "asc")
@@ -642,6 +877,166 @@ def networks():
         return jsonify(items=items, total=total, page=page, limit=limit, files=len(selected))
     except (ValueError, sqlite3.Error) as e:
         return jsonify(error=str(e)), 400
+
+
+@app.get("/api/analysis/modules")
+def analysis_module_list():
+    try:
+        ensure_analysis_state()
+        settings = analysis_store.list_module_settings(ANALYSIS_DB)
+        return jsonify(items=[
+            {
+                "analysis_type": module.name,
+                "analysis_version": module.version,
+                "description": module.description,
+                "required_inputs": list(module.required_tables),
+                "enabled": settings.get(module.name, True),
+            }
+            for module in analysis_modules()
+        ])
+    except (sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
+
+
+@app.patch("/api/analysis/modules/<module_name>")
+def analysis_module_update(module_name):
+    try:
+        ensure_analysis_state()
+        module = get_module(module_name)
+        if module is None:
+            return jsonify(error="Analysis module not found"), 404
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(payload.get("enabled"), bool):
+            raise ValueError("enabled must be true or false")
+        analysis_store.set_module_enabled(ANALYSIS_DB, module_name, payload["enabled"])
+        return jsonify(
+            analysis_type=module.name,
+            analysis_version=module.version,
+            enabled=payload["enabled"],
+        )
+    except (ValueError, sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
+
+
+@app.post("/api/analysis/jobs")
+def analysis_job_create():
+    try:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            raise ValueError("Send job parameters as a JSON object")
+        file_id = str(payload.get("file", "")).strip()
+        if not file_id:
+            raise ValueError("Select one session")
+        parameters = payload.get("parameters", {})
+        if not isinstance(parameters, dict):
+            raise ValueError("parameters must be a JSON object")
+        analysis_type = str(payload.get("analysis_type", "session_quality")).strip()
+        job = enqueue_analysis(file_id, analysis_type, parameters)
+        return jsonify(job), 202
+    except (ValueError, sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
+
+
+@app.get("/api/analysis/jobs")
+def analysis_job_list():
+    try:
+        ensure_analysis_state()
+        page = max(1, request.args.get("page", 1, type=int))
+        limit = min(100, max(10, request.args.get("limit", 25, type=int)))
+        status = request.args.get("status", "").strip() or None
+        if status and status not in analysis_store.VALID_STATUSES:
+            raise ValueError("Invalid job status")
+        analysis_type = request.args.get("analysis_type", "").strip() or None
+        if analysis_type and get_module(analysis_type) is None:
+            raise ValueError("Unknown analysis module")
+        items, total = analysis_store.list_jobs(
+            ANALYSIS_DB, page, limit, status, analysis_type
+        )
+        return jsonify(items=items, total=total, page=page, limit=limit)
+    except (ValueError, sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
+
+
+@app.get("/api/analysis/jobs/<job_id>")
+def analysis_job_detail(job_id):
+    try:
+        ensure_analysis_state()
+        job = analysis_store.get_job(ANALYSIS_DB, job_id)
+        if job is None:
+            return jsonify(error="Analysis job not found"), 404
+        return jsonify(job)
+    except (sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
+
+
+@app.post("/api/analysis/jobs/<job_id>/cancel")
+def analysis_job_cancel(job_id):
+    try:
+        ensure_analysis_state()
+        job = analysis_store.cancel_job(ANALYSIS_DB, job_id)
+        if job is None:
+            return jsonify(error="Analysis job not found"), 404
+        return jsonify(job)
+    except (sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
+
+
+@app.get("/api/analysis/results/<result_id>")
+def analysis_result_detail(result_id):
+    try:
+        ensure_analysis_state()
+        result = analysis_store.get_result(ANALYSIS_DB, result_id)
+        if result is None:
+            return jsonify(error="Analysis result not found"), 404
+        return jsonify(result)
+    except (sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
+
+
+@app.get("/api/analysis/results")
+def analysis_result_list():
+    try:
+        ensure_analysis_state()
+        page = max(1, request.args.get("page", 1, type=int))
+        limit = min(100, max(10, request.args.get("limit", 25, type=int)))
+        analysis_type = request.args.get("analysis_type", "").strip() or None
+        if analysis_type and get_module(analysis_type) is None:
+            raise ValueError("Unknown analysis module")
+        file_id = request.args.get("file", "").strip() or None
+        if file_id:
+            resolve_file(file_id)
+        items, total = analysis_store.list_results(
+            ANALYSIS_DB, page, limit, analysis_type, file_id
+        )
+        return jsonify(items=items, total=total, page=page, limit=limit)
+    except (ValueError, sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
+
+
+@app.get("/api/analysis/results/latest")
+def analysis_result_latest():
+    try:
+        ensure_analysis_state()
+        file_id = request.args.get("file", "").strip()
+        if not file_id:
+            raise ValueError("Select one session")
+        capture_path, _meta = resolve_file(file_id)
+        analysis_type = request.args.get(
+            "analysis_type", "session_quality"
+        ).strip()
+        if get_module(analysis_type) is None:
+            raise ValueError("Unknown analysis module")
+        result = analysis_store.latest_result(
+            ANALYSIS_DB, analysis_type, "session", file_id
+        )
+        if result is None:
+            return jsonify(error="No completed analysis result is available"), 404
+        result["is_current"] = (
+            result["input_revision"] == capture_revision(file_id, capture_path)
+        )
+        return jsonify(result)
+    except (ValueError, sqlite3.Error, OSError) as error:
+        return jsonify(error=str(error)), 400
 
 
 @app.errorhandler(413)

@@ -4,15 +4,22 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Wardrive Overview</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.12.0/dist/maplibre-gl.css" integrity="sha384-mnM9NG1099tBMNxdDQNDKIxYcn/fmqQXFJvbT5l1MsrWvzfxBEffceBsw75/cW2R" crossorigin="">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/views.css">
+  <link rel="stylesheet" href="/static/refresh.css">
   <script>try{const theme=localStorage.getItem('wdvisual-theme');if(theme)document.documentElement.dataset.theme=theme;else if(matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.dataset.theme='dark'}catch{}</script>
 </head>
 <body>
-<header><div><span class="eyebrow">KISMET INTELLIGENCE</span><h1>Wardrive <i>Visual</i></h1></div><div class="header-actions"><button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span aria-hidden="true">☾</span><b>DARK</b></button><div class="live"><b></b> LOCAL ANALYSIS</div></div></header>
+<header class="app-header">
+  <div class="brand"><span class="brand-mark" aria-hidden="true">W</span><div><span class="eyebrow">LOCAL RF INTELLIGENCE</span><h1>WD<i>Visual</i></h1></div></div>
+  <div class="header-actions"><div class="live"><b></b> PRIVATE WORKSPACE</div><button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span aria-hidden="true">☾</span><b>DARK</b></button></div>
+</header>
 <main>
   <nav class="app-tabs" role="tablist" aria-label="Application views">
     <button id="viewerTabButton" class="active" type="button" role="tab" aria-selected="true" aria-controls="viewerTab" data-tab="viewer">VIEWER</button>
+    <button id="qualityTabButton" type="button" role="tab" aria-selected="false" aria-controls="qualityTab" data-tab="quality">DATA QUALITY</button>
+    <button id="jobsTabButton" type="button" role="tab" aria-selected="false" aria-controls="jobsTab" data-tab="jobs">JOBS</button>
     <button id="generatorTabButton" type="button" role="tab" aria-selected="false" aria-controls="generatorTab" data-tab="generator">GENERATE DATA</button>
   </nav>
   <section id="viewerTab" class="app-tab-panel" role="tabpanel" aria-labelledby="viewerTabButton">
@@ -39,14 +46,25 @@
     <article><span>GEOLOCATION</span><strong id="located">—</strong><small>devices with coordinates</small></article>
     <article><span>TIME SPAN</span><strong id="duration">—</strong><small id="period">—</small></article>
   </section>
-  <section class="panel timeline"><div class="panel-title"><span>CAPTURE GROWTH OVER TIME</span><div class="legend"><i class="packets"></i>Packets <i class="devices"></i>Devices <i class="ssids"></i>SSIDs</div></div><div id="timeline"><span>Loading timeline…</span></div></section>
   <section class="panel map-panel">
-    <div class="panel-title"><span>GPS LOCATIONS</span><div class="map-legend"><i class="network"></i>Networks <i class="device"></i>Devices <b id="mapCount">0</b> LOCATED</div></div>
+    <div class="map-toolbar">
+      <div class="map-heading"><span class="eyebrow">SPATIAL OVERVIEW</span><h2>Observation map</h2><small><b id="mapCount">0</b> located devices across the active capture set</small></div>
+      <div class="map-actions" aria-label="Map controls">
+        <button class="map-kind active" type="button" data-map-kind="network" aria-pressed="true"><i class="network"></i>NETWORKS</button>
+        <button class="map-kind active" type="button" data-map-kind="device" aria-pressed="true"><i class="device"></i>DEVICES</button>
+        <button id="mapRecenter" type="button">⌖ FIT</button>
+        <button id="map3dToggle" type="button" aria-pressed="false">◇ 3D</button>
+        <button id="mapExpand" type="button" aria-label="Expand map">↗</button>
+      </div>
+    </div>
     <div class="map-stage" id="mapStage">
       <div id="worldMap" role="application" aria-label="Interactive world map of located networks and devices"></div>
+      <div id="worldMap3d" role="application" aria-label="Interactive 3D map of located networks and devices" hidden></div>
+      <div class="map-status"><span id="mapModeText">2D STREET</span><span id="mapZoomText">ZOOM 2</span><span id="mapDepthText">3D BUILDINGS AT Z14+</span></div>
       <div id="mapEmpty" class="map-empty">Loading GPS locations…</div>
     </div>
   </section>
+  <section class="panel timeline"><div class="panel-title"><span>CAPTURE GROWTH OVER TIME</span><div class="legend"><i class="packets"></i>Packets <i class="devices"></i>Devices <i class="ssids"></i>SSIDs</div></div><div id="timeline"><span>Loading timeline…</span></div></section>
   <section class="workspace">
     <aside class="panel filters"><div class="panel-title">FILTERS <button id="reset">RESET</button></div>
       <label>SEARCH<input id="q" placeholder="SSID, MAC, manufacturer…"></label>
@@ -96,8 +114,45 @@
       </section>
     </form>
   </section>
+  <section id="qualityTab" class="app-tab-panel analysis-view" role="tabpanel" aria-labelledby="qualityTabButton" hidden>
+    <div class="analysis-intro">
+      <div><span class="eyebrow">VERSIONED SESSION ANALYSIS</span><h2>Data Quality</h2></div>
+      <p>Review measurable capture quality with explicit confidence and limitations. Scores are estimates, not measurement guarantees.</p>
+    </div>
+    <section class="panel analysis-toolbar">
+      <div><span>ACTIVE SESSION</span><strong id="qualitySession">Select one capture in Viewer</strong></div>
+      <button id="runQuality" class="primary-action" type="button">RUN / RE-RUN ANALYSIS</button>
+    </section>
+    <div id="qualityStatus" aria-live="polite"></div>
+    <section id="qualityResult" class="quality-result" hidden>
+      <div class="quality-hero panel">
+        <div><span>SESSION QUALITY</span><strong id="qualityScore">—</strong><small id="qualityGrade">—</small></div>
+        <div class="quality-summary"><p id="qualitySummary"></p><small id="qualityMetadata"></small></div>
+        <div><span>CONFIDENCE</span><strong id="qualityConfidence">—</strong><small id="qualityConfidenceLevel">—</small></div>
+      </div>
+      <section class="panel">
+        <div class="panel-title"><span>MEASURABLE COMPONENTS</span><small>EXPLANATIONS AND OBSERVED VALUES</small></div>
+        <div id="qualityComponents" class="quality-components"></div>
+      </section>
+      <div class="quality-detail-grid">
+        <section class="panel quality-detail"><div class="panel-title">CONFIDENCE EXPLANATION</div><ul id="qualityReasons"></ul></section>
+        <section class="panel quality-detail"><div class="panel-title">WARNINGS & LIMITATIONS</div><ul id="qualityWarnings"></ul></section>
+      </div>
+    </section>
+  </section>
+  <section id="jobsTab" class="app-tab-panel analysis-view" role="tabpanel" aria-labelledby="jobsTabButton" hidden>
+    <div class="analysis-intro">
+      <div><span class="eyebrow">BACKGROUND PROCESSING</span><h2>Analysis Jobs</h2></div>
+      <p>Analysis continues outside normal API requests. This view shows persisted progress, results and failures.</p>
+    </div>
+    <section class="panel jobs-panel">
+      <div class="panel-title"><span>RECENT JOBS</span><button id="refreshJobs" type="button">REFRESH</button></div>
+      <div class="table-wrap"><table><thead><tr><th>ANALYSIS</th><th>SESSION</th><th>STATUS</th><th>PROGRESS</th><th>CREATED</th><th>ACTION</th></tr></thead><tbody id="jobRows"><tr><td colspan="6" class="empty">Loading jobs…</td></tr></tbody></table></div>
+    </section>
+  </section>
 </main>
 <div id="networkModal" class="modal" aria-hidden="true"><section class="drawer panel"><button id="closeNetwork" class="close" aria-label="Close">×</button><div id="networkDetail"></div></section></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/maplibre-gl@5.12.0/dist/maplibre-gl.js" integrity="sha384-7+0QVD3+GoeOjaW35yTmpj0FR1K45ugw4ZUY0qEFomHSmAude6e9nB6/Xy5aPnzQ" crossorigin=""></script>
 <script src="/static/app.js"></script>
 </body></html>
