@@ -69,34 +69,6 @@ python3 scripts/add_synthetic_gps.py example.kismet --backup /tmp/example-before
 
 This modifies the database in place and must not be used on an original capture without a backup.
 
-## Destructively trim capture edges
-
-To remove the first and last two minutes from one or more captures in-place:
-
-```bash
-python3 scripts/trim_kismet_edges.py /path/to/captures
-```
-
-Directories are searched recursively for `*.kismet`. This command intentionally
-makes no backups. It deletes timestamped rows outside the retained interval,
-removes every aggregate device record whose lifetime overlaps either deleted edge,
-clears aggregate GPS fields (including location data duplicated in device JSON),
-checkpoints SQLite, and vacuums each database. Deleting overlapping device records
-is necessary because one row can contain an SSID, MAC address, counters, and other
-metadata learned across the device's entire observed lifetime. Close Kismet and
-WDVisual before running it. Use `--seconds N` to choose a different duration.
-
-For strict row-only deletion, without modifying any retained row, use:
-
-```bash
-python3 scripts/delete_kismet_edge_rows.py /path/to/unprocessed-captures
-```
-
-This deletes complete rows from every table with a `ts_sec` column in the first
-and last two minutes. It also deletes complete device rows whose summarized
-lifetime overlaps either edge, since those rows may contain an SSID or other
-metadata learned there. Tables without timestamps cannot be assigned to an edge
-and are left unchanged. The operation is in-place and creates no backups.
 
 ## Storage
 
