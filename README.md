@@ -32,8 +32,7 @@ metadata, the quality algorithm and API are documented in
 
 ## Quick Start
 
-Keep your `.kismet` files in the parent directory, then run this from the `webapp` directory:
-
+Keep your `.kismet` files in the parent directory and start the app from there:
 ```bash
 docker compose up --build
 ```
