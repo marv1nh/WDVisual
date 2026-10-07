@@ -1,87 +1,132 @@
 # WDVisual
 
-A local, read-only web app for exploring Wardrive and Kismet `.kismet` SQLite databases. It supports search, filters, sorting, statistics, uploads, SSID-grouped Wi-Fi network views, individual radio device views, and a cumulative timeline for packets, devices, and unique SSIDs.
+WDVisual is a local web app for exploring wireless network data collected with [Kismet](https://www.kismetwireless.net/). It turns `.kismet` wardriving captures into searchable tables, statistics, timelines, and interactive maps—without changing the original capture files.
 
-## Features
+## What can you explore?
 
-- Browse mounted `.kismet` files or upload a file through the web UI.
-- Select one or more captures at once to merge stats, timelines, maps, and network/device lists.
-- Generate synthetic Wi-Fi captures for feature development without modifying source recordings.
-- Switch between Wi-Fi networks grouped by SSID and individual radio devices.
-- Inspect access point radios and associated clients using Kismet's last-BSSID
-  metadata, with captured BSSID traffic as a fallback.
-- Sort networks by their number of inferred associated clients.
-- Open an SSID detail drawer with AP coordinates, a dedicated location map, and
-  a shortcut that focuses the matching radios on the main map.
-- Search, filter, and sort network and device lists.
-- Review packet, device, and SSID trends over time.
-- Plot GPS-located networks and devices on a detailed OpenStreetMap map with
-  pan and zoom controls. Hovering a located Wi-Fi client shows its name (or
-  manufacturer when unnamed), with inferred connections drawn to its located
-  network access point.
-- Switch the observation map between a fast Leaflet street view and an optional
-  MapLibre vector view with clustering, pitch, rotation, and close-zoom 3D
-  buildings.
-- Run versioned session-quality analysis in the background, review confidence
-  and limitations, and monitor or cancel persisted jobs.
+- **2D and 3D maps** of networks and devices that have GPS coordinates.
+- **Wi-Fi networks and radio devices**, including names, MAC addresses, manufacturers, channels, security types, signal strength, and packet activity.
+- **Network details** showing observed access points and likely connected clients.
+- **Capture timelines** showing when packets, devices, and unique Wi-Fi names were discovered.
+- **Multiple captures at once** for a combined view of several wardriving sessions.
+- **Search, filters, and sorting** to make larger captures easier to investigate.
+- **Session-quality analysis** with a score, confidence information, and notes about missing or limited data.
+- **Synthetic test captures** for trying the interface without using real wardriving data.
 
-The staged analysis-platform design and pull-request sequence are documented in
-[`docs/feature-plan.md`](docs/feature-plan.md). Module contracts, result
-metadata, the quality algorithm and API are documented in
-[`docs/analysis-architecture.md`](docs/analysis-architecture.md).
+## What is a `.kismet` file?
 
-## Quick Start
+Kismet can record observations made while moving through an area with a wireless receiver and, optionally, a GPS device. The resulting `.kismet` file can contain nearby networks, devices, signal levels, packet counts, timestamps, and locations.
 
-Keep your `.kismet` files in the parent directory and start the app from there:
-```bash
-docker compose up --build
-```
+WDVisual reads this information and presents it in a more visual format. Captures without GPS data still work; their networks and devices appear in the tables and statistics, but not on the map.
 
-Open <http://localhost:8080>.
+Only collect and use wireless data where you are permitted to do so. Capture files can contain sensitive information such as network names and locations, so review them carefully before sharing.
 
-The default GPS map loads pinned Leaflet assets and OpenStreetMap tiles over the
-internet. Optional 3D mode loads pinned MapLibre assets and the OpenFreeMap
-Liberty vector style. Map providers receive viewport tile requests, not the
-local network/device observation dataset. The rest of the capture viewer
-remains local.
+## Quick start
 
-## Synthetic capture generator
+You need [Docker](https://docs.docker.com/get-docker/) with Docker Compose.
 
-Open **Generate Data** in the web app to create a new test capture. Choose:
+1. Clone the project and enter its directory:
 
-- The number of Wi-Fi networks.
-- The number of clients attached to each network. The total device count is `networks × (clients + 1)`.
-- An SSID prefix. A prefix of `test` creates `test 1`, `test 2`, and so on.
-- Whether to include GPS observations. Pick the center on the map or enter latitude and longitude; observations are distributed throughout a 1 km circle instead of sharing one point.
+   ```bash
+   git clone https://github.com/marv1nh/WDVisual.git
+   cd WDVisual
+   ```
 
-The generated file is validated, stored in the `kismet_uploads` volume, and selected in the Viewer when it is ready. Generated captures include AP/client packet relationships for the network detail view.
+2. Copy any `.kismet` files you want to browse into the root of the project directory. You can skip this step and upload a capture through the web interface instead.
 
-These files implement the schema used by WDVisual. They are development fixtures, not complete Kismet logs intended for import into other Kismet tools.
+3. Build and start WDVisual:
 
-## Synthetic GPS test data
+   ```bash
+   docker compose up --build
+   ```
 
-For an existing disposable capture, the legacy command-line helper can assign deterministic test locations to every device:
+4. Open <http://localhost:8080> in your browser.
 
-```bash
-python3 scripts/add_synthetic_gps.py example.kismet --backup /tmp/example-before-gps.kismet
-```
+Select one or more captures from the file menu to begin exploring them.
 
-This modifies the database in place and must not be used on an original capture without a backup.
+## Using WDVisual
 
+### Explore captures
 
-## Storage
+The **Viewer** gives you an overview of the selected captures. Switch between networks grouped by Wi-Fi name and individual radio devices, then use the search and filters to narrow the results. Selecting a network opens a detailed view of its access points, observed clients, and available locations.
 
-- The parent directory is mounted read-only at `/data`.
-- Uploaded and generated files are stored separately in the `kismet_uploads` Docker volume.
-- The default upload limit is 512 MB and can be changed with `MAX_UPLOAD_MB` in `compose.yaml`.
-- Derived jobs and results are stored separately in the `wdvisual_state` volume.
-  Set `WDVISUAL_STATE_DB` to change the application-database path. Removing this
-  database does not change capture files; analyses can be regenerated.
+The observation map has two modes:
 
-## Stop
+- **2D Street** provides a quick OpenStreetMap view with pan and zoom controls.
+- **3D Vector** adds clustering, rotation, pitch, and 3D buildings at close zoom levels. Also the best performing mode when dealing with a lot of data.
+
+When location data is available, WDVisual can also show inferred links between Wi-Fi clients and their access points.
+
+### Check capture quality
+
+The **Data Quality** view analyses a capture in the background and reports how complete and useful the session appears to be. Results include a score, confidence level, explanations, and warnings. The **Analysis Jobs** view lets you follow or cancel this background work.
+
+### Generate test data
+
+The **Generate Data** view creates a synthetic `.kismet` file for development and demonstrations. You can choose:
+
+- How many Wi-Fi networks to create.
+- How many clients to attach to each network.
+- The prefix used for generated network names.
+- Whether to include GPS observations and where to centre them.
+
+Generated locations are spread across a one-kilometre area. These files imitate the parts of the Kismet schema used by WDVisual; they are test fixtures, not full Kismet recordings intended for other tools.
+
+## Privacy and data handling
+
+WDVisual is designed to keep capture processing local:
+
+- Mounted `.kismet` files are opened in SQLite read-only mode and are never migrated or modified.
+- The project directory is mounted read-only inside the container.
+- Files uploaded through the interface and generated test captures are stored separately in a Docker volume.
+- Analysis results are stored in their own Docker volume and can be regenerated.
+
+The maps require an internet connection. The 2D view loads Leaflet and OpenStreetMap tiles, while the optional 3D view loads MapLibre and the OpenFreeMap Liberty style. These providers receive requests for the map area shown in your browser; WDVisual does not send them the network or device records from your capture.
+
+## Configuration
+
+The defaults are defined in [`compose.yaml`](compose.yaml):
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `KISMET_DATA_DIR` | `/data` | Directory containing mounted `.kismet` files. |
+| `KISMET_UPLOAD_DIR` | `/uploads` | Storage for uploaded and generated captures. |
+| `WDVISUAL_STATE_DB` | `/state/wdvisual.sqlite3` | Database containing analysis jobs and results. |
+| `MAX_UPLOAD_MB` | `512` | Maximum upload size in megabytes. |
+
+The app is exposed on port `8080`. Change the port mapping in `compose.yaml` if that port is already in use.
+
+## Stop or remove WDVisual
+
+Stop the running containers:
 
 ```bash
 docker compose down
 ```
 
-Uploaded files are preserved. Use `docker compose down -v` only when you intentionally want to delete the upload volume as well.
+Uploaded captures and analysis results remain in their Docker volumes. To remove those volumes too, use the following command only when you intentionally want to delete that stored data:
+
+```bash
+docker compose down -v
+```
+
+## Development
+
+The backend is a small Flask service in `webapp/app.py`. The dependency-free frontend is served from `webapp/static/`, and SQLite capture access remains read-only.
+
+Useful checks before submitting a change:
+
+```bash
+cd webapp
+python -m compileall app.py
+python -m unittest discover -s tests
+node --check static/app.js
+```
+
+Node.js is only needed for the JavaScript syntax check, not to run WDVisual.
+
+The legacy `scripts/add_synthetic_gps.py` helper can add deterministic test coordinates to an existing disposable capture. It modifies the database in place, so never run it against an original recording without creating a backup first.
+
+## Source code
+
+WDVisual is available on [GitHub](https://github.com/marv1nh/WDVisual).
